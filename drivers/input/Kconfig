@@ -17,12 +17,17 @@ config INPUT_PINNACLE_INIT_PRIORITY
     int "Cirque Pinnacle initialization priority"
     default INPUT_INIT_PRIORITY
 
-if ZMK_MOUSE
-
 config ZMK_INPUT_PINNACLE_IDLE_SLEEPER
     bool "Pinnacle Sleep linked to ZMK idle state"
     default n
 
-endif
+config ZMK_INPUT_PINNACLE_REPORT_INTERVAL_MIN
+	int "Cirque Pinnacle's default minimum report rate"
+	default 0
+	help
+	  Default minimum report interval in milliseconds.
+	　  Slow down input reporting for hid queue over the air.
+	　  Turn value down to 8ms to get sharp response if use with USB only.
+
 
 endif
