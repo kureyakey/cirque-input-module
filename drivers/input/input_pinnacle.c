@@ -231,7 +231,7 @@ static int pinnacle_era_write(const struct device *dev, const uint16_t addr, uin
 
 static void pinnacle_report_data(const struct device *dev) {
     const struct pinnacle_config *config = dev->config;
-    uint8_t packet[3];
+    uint8_t packet[4];
     int ret;
     ret = pinnacle_seq_read(dev, PINNACLE_STATUS1, packet, 1);
     if (ret < 0) {
@@ -239,13 +239,21 @@ static void pinnacle_report_data(const struct device *dev) {
         return;
     }
 
+#if CONFIG_ZMK_INPUT_PINNACLE_REPORT_INTERVAL_MIN > 0
+    static int64_t last_smp_time = 0;
+    static int64_t last_rpt_time = 0;
+    int64_t now = k_uptime_get();
+    //LOG_WRN("Pinnacle now ti,e: %d", now);
+    //LOG_WRN("Pinnacle last_smp_time: %d", last_rpt_time);
+#endif
+
     LOG_HEXDUMP_DBG(packet, 1, "Pinnacle Status1");
 
     // Ignore 0xFF packets that indicate communcation failure, or if SW_DR isn't asserted
     if (packet[0] == 0xFF || !(packet[0] & PINNACLE_STATUS1_SW_DR)) {
         return;
     }
-    ret = pinnacle_seq_read(dev, PINNACLE_2_2_PACKET0, packet, 3);
+    ret = pinnacle_seq_read(dev, PINNACLE_2_2_PACKET0, packet, 4);
     if (ret < 0) {
         LOG_ERR("read packet: %d", ret);
         return;
@@ -257,14 +265,20 @@ static void pinnacle_report_data(const struct device *dev) {
     uint8_t btn = packet[0] &
                   (PINNACLE_PACKET0_BTN_PRIM | PINNACLE_PACKET0_BTN_SEC | PINNACLE_PACKET0_BTN_AUX);
 
-    int8_t dx = (int8_t)packet[1];
-    int8_t dy = (int8_t)packet[2];
+                  
+    static int16_t dx = 0;
+    static int16_t dy = 0;
+    static int16_t dv = 0;
+    int8_t x = (int8_t)packet[1];
+    int8_t y = (int8_t)packet[2];
+    int8_t v = (int8_t)packet[3];
+    
 
     if (packet[0] & PINNACLE_PACKET0_X_SIGN) {
-        WRITE_BIT(dx, 7, 1);
+        WRITE_BIT(x, 7, 1);
     }
     if (packet[0] & PINNACLE_PACKET0_Y_SIGN) {
-        WRITE_BIT(dy, 7, 1);
+        WRITE_BIT(y, 7, 1);
     }
 
     if (data->in_int) {
@@ -284,8 +298,59 @@ static void pinnacle_report_data(const struct device *dev) {
 
     data->btn_cache = btn;
 
-    input_report_rel(dev, INPUT_REL_X, dx, false, K_FOREVER);
-    input_report_rel(dev, INPUT_REL_Y, dy, true, K_FOREVER);
+
+
+ #if CONFIG_ZMK_INPUT_PINNACLE_REPORT_INTERVAL_MIN > 0
+    if (now - last_smp_time >= CONFIG_ZMK_INPUT_PINNACLE_REPORT_INTERVAL_MIN) {
+        dx = 0;
+        dy = 0;
+        dv = 0;
+    }
+    last_smp_time = now;
+#endif
+
+    dx += x;
+    dy += y;
+    dv += v;
+  
+#if CONFIG_ZMK_INPUT_PINNACLE_REPORT_INTERVAL_MIN > 0
+    LOG_WRN("Pinnacle REPORT_INTERVAL %d",now - last_rpt_time);
+    if (now - last_rpt_time < CONFIG_ZMK_INPUT_PINNACLE_REPORT_INTERVAL_MIN) {
+        //LOG_WRN("Pinnacle No Report!");
+        return ;
+    }
+#endif
+
+    // fetch report value
+    int16_t rx = dx;
+    int16_t ry = dy;
+    int16_t rv = dv;
+    dx = 0;
+    dy = 0;
+    dv = 0;
+
+#if CONFIG_ZMK_INPUT_PINNACLE_REPORT_INTERVAL_MIN > 0
+    last_rpt_time = now;
+#endif
+
+    if(v) {
+        input_report_rel(dev, INPUT_REL_WHEEL, rv, true, K_FOREVER);
+        //LOG_WRN("Pinnacle Reported!");
+    } else {
+        input_report_rel(dev, INPUT_REL_X, rx, false, K_FOREVER);
+        input_report_rel(dev, INPUT_REL_Y, ry, true, K_FOREVER);
+    }
+
+    uint8_t sys_cfg;
+    ret = pinnacle_seq_read(dev, PINNACLE_SYS_CFG, &sys_cfg, 1);
+    if (ret < 0) {
+        LOG_ERR("can't read sys config %d", ret);
+        return ;
+    }
+    if ((sys_cfg & PINNACLE_SYS_CFG_EN_SLEEP) != 0) {
+        LOG_WRN("Pinnacle was in sleep mode, waking up...");
+        pinnacle_set_sleep(dev, false); 
+    }
 
     return;
 }
@@ -297,8 +362,6 @@ static void pinnacle_work_cb(struct k_work *work) {
 
 static void pinnacle_gpio_cb(const struct device *port, struct gpio_callback *cb, uint32_t pins) {
     struct pinnacle_data *data = CONTAINER_OF(cb, struct pinnacle_data, gpio_cb);
-
-    LOG_DBG("HW DR asserted");
     data->in_int = true;
     k_work_submit(&data->work);
 }
@@ -490,7 +553,16 @@ static int pinnacle_init(const struct device *dev) {
         LOG_DBG("Failed to update sleep interaval %d", ret);
     }
 
-    uint8_t feed_cfg2 = PINNACLE_FEED_CFG2_EN_IM | PINNACLE_FEED_CFG2_EN_BTN_SCRL;
+    uint8_t feed_cfg3 = 0x00;
+    if (config->no_smoothing) {
+        feed_cfg3 |= PINNACLE_FEED_CFG3_DIS_SMO;
+    }
+    ret = pinnacle_write(dev, PINNACLE_FEED_CFG3, feed_cfg3);
+    if (ret < 0) {
+        LOG_ERR("can't write %d", ret);
+        return ret;
+    }
+    uint8_t feed_cfg2 = PINNACLE_FEED_CFG2_EN_IM | PINNACLE_FEED_CFG2_DIS_SCRL| PINNACLE_FEED_CFG2_EN_BTN_SCRL;
     if (config->no_taps) {
         feed_cfg2 |= PINNACLE_FEED_CFG2_DIS_TAP;
     }
