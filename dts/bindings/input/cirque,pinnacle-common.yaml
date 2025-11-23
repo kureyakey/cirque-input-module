@@ -14,6 +14,8 @@ properties:
     type: boolean
   no-taps:
     type: boolean
+  no-smoothing:
+    type: boolean
   sensitivity:
     type: string
     enum:
@@ -28,4 +30,3 @@ properties:
   y-axis-z-min:
     type: int
     default: 4
-
