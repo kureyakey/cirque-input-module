@@ -362,7 +362,8 @@ static int pinnacle_read_abs(const struct device *dev) {
     uint8_t xy_high = packet[4];
     data->last_x = ((xy_high & 0x0F) << 8) | x_low;
     data->last_y = ((xy_high & 0xF0) << 4) | y_low;
-    data->last_z = (uint8_t)(packet[5] & 0x1F);
+    /* PACKETBYTE_5 stores Touch in bit 7 and Z in bits 5:0. */
+    data->last_z = (uint8_t)(packet[5] & 0x3F);
 
     LOG_DBG("button: %d, x: %d y: %d z: %d", data->last_btn, data->last_x, data->last_y, data->last_z);
     return 0;
