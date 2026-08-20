@@ -1,7 +1,6 @@
 # Copyright (c) 2022 The ZMK Contributors
 # SPDX-License-Identifier: MIT
-
-menuconfig INPUT_PINNACLE
+menuconfig INPUT_PINNACLE_CIRQUE_LEGACY
     bool "Cirque Pinnacle trackpads"
     default y
     depends on GPIO
@@ -10,19 +9,13 @@ menuconfig INPUT_PINNACLE
     depends on DT_HAS_CIRQUE_PINNACLE_ENABLED
     help
       Enable driver for Cirque Pinnacle trackpads
-
-if INPUT_PINNACLE
-
+if INPUT_PINNACLE_CIRQUE_LEGACY
 config INPUT_PINNACLE_INIT_PRIORITY
     int "Cirque Pinnacle initialization priority"
     default INPUT_INIT_PRIORITY
-
 if ZMK_MOUSE
-
 config ZMK_INPUT_PINNACLE_IDLE_SLEEPER
     bool "Pinnacle Sleep linked to ZMK idle state"
     default n
-
 endif
-
 endif
